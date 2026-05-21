@@ -1,15 +1,16 @@
-from hashlib import sha256
 import sys
-import hashlib
-
-m = hashlib.sha256()
+from hashlib import sha256
 
 def main():
-    args = sys.argv
-    argC = size(sys.argv)
+    for arg in sys.argv[1:]:
+        print(getFileChecksum(arg))
 
 def getFileChecksum(filePath: str) -> str:
-    data: bytes
+    h = sha256()
     with open(filePath, "rb") as f:
-        data = f.read()
-    return sha256(data).hexdigest()
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+if __name__ == "__main__":
+    main()
