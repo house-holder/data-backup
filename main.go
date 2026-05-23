@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 )
@@ -12,19 +13,34 @@ type File struct {
 	Hash      string `json:"hash"`
 }
 
-type Site struct {
-	Name       string          `json:"name"`
-	Path       string          `json:"path"`
+type Registry struct {
 	LastBackup int64           `json:"last_backup"`
 	Backups    map[string]File `json:"backups"`
 }
 
-// TODO: plan functions
-/*
-getSha256 		-> takes filepath, returns hash string (async/threaded?)
-loadMetadata 	-> loads JSON (default path) into memory
-storeMetadata 	-> converts in-memory objects to written JSON
-*/
+type DBCfg struct {
+	Source string `json:"source"`
+	Stage  string `json:"stage"`
+}
+
+type Config struct {
+	Registry   string           `json:"registry_path"`
+	RemotePath string           `json:"remote_path"`
+	Databases  map[string]DBCfg `json:"databases"`
+}
+
+func loadRegistry(cfgPath string) map[string]Registry {
+	var registry map[string]Registry
+	jsonData, err := os.ReadFile(cfgPath)
+	if err != nil {
+		panic(err)
+	}
+	err = json.Unmarshal(jsonData, &registry)
+	if err != nil {
+		panic(err)
+	}
+	return registry
+}
 
 func getSHA256(data []byte) string {
 	h := sha256.New()
@@ -40,11 +56,25 @@ func getFileHash(path string) (string, error) {
 	return getSHA256(data), nil
 }
 
-func main() {
-	_, _ = getFileHash("nonsense")
+func getCfg() string {
+	if path := os.Getenv("CFG_PATH"); path != "" {
+		fmt.Println("Using dev config")
+		return path
+	}
+	return "/etc/data-backup/config.toml"
+}
 
-	fmt.Println(getSHA256([]byte("some test string")))
-	// f1ebecbffecf3f8e4f60db92de00b600ee7b695c30f255463d55b36ba4ae35d6
-	fmt.Println(getSHA256([]byte("any test string")))
-	// 9271675f13b85ffee2af5c98a4145382579ef20a2a5cb1310756357b5267090a
+func getRegistry() string {
+	if path := os.Getenv("REGISTRY"); path != "" {
+		fmt.Println("Using dev config")
+		return path
+	}
+	return "/etc/data-backup/registry.json"
+}
+
+func main() {
+	sites := loadSites(getRegistry())
+	for k, v := range sites {
+		fmt.Printf("Key: %s, val: %d\n", k, v)
+	}
 }
