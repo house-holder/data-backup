@@ -5,41 +5,69 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"time"
+
+	"github.com/BurntSushi/toml"
 )
 
-type File struct {
-	SizeBytes int    `json:"size_bytes"`
-	Hash      string `json:"hash"`
+type DBFile struct {
+	Size int    `json:"size_bytes"`
+	Hash string `json:"hash"`
 }
 
 type Registry struct {
-	LastBackup int64           `json:"last_backup"`
-	Backups    map[string]File `json:"backups"`
+	LastBackup int64             `json:"last_backup"`
+	BytesUsed  int               `json:"bytes_used"`
+	Backups    map[string]DBFile `json:"backups"`
 }
 
 type DBCfg struct {
-	Source string `json:"source"`
-	Stage  string `json:"stage"`
+	Source string `toml:"source"`
+	Stage  string `toml:"stage"`
 }
 
 type Config struct {
-	Registry   string           `json:"registry_path"`
-	RemotePath string           `json:"remote_path"`
-	Databases  map[string]DBCfg `json:"databases"`
+	RegistryPath string           `toml:"registry_path"`
+	RemotePath   string           `toml:"remote_path"`
+	Databases    map[string]DBCfg `toml:"databases"`
 }
 
-func loadRegistry(cfgPath string) map[string]Registry {
-	var registry map[string]Registry
-	jsonData, err := os.ReadFile(cfgPath)
+func saveRegistry(r map[string]Registry, regPath string) error {
+	data, err := json.MarshalIndent(r, "", "\t")
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("failed to marshal registry: %w", err)
 	}
-	err = json.Unmarshal(jsonData, &registry)
+	err = os.WriteFile(regPath, data, 0644)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("failed to write registry: %w", err)
 	}
-	return registry
+	return nil
+}
+
+func loadRegistry(path string, r *map[string]Registry) error {
+	jsonData, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read registry: %w", err)
+	}
+	err = json.Unmarshal(jsonData, r)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal registry: %w", err)
+	}
+	return nil
+}
+
+func loadConfig(path string, c *Config) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read config: %w", err)
+	}
+	err = toml.Unmarshal(data, c)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+	return nil
 }
 
 func getSHA256(data []byte) string {
@@ -48,15 +76,18 @@ func getSHA256(data []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func getFileHash(path string) (string, error) {
-	data, err := os.ReadFile(path)
+func getFileInfo(path string) (*DBFile, error) {
+	var f DBFile
+	bytes, err := os.ReadFile(path)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return getSHA256(data), nil
+	f.Hash = getSHA256(bytes)
+	f.Size = len(bytes)
+	return &f, nil
 }
 
-func getCfg() string {
+func getConfig() string {
 	if path := os.Getenv("CFG_PATH"); path != "" {
 		fmt.Println("Using dev config")
 		return path
@@ -64,17 +95,51 @@ func getCfg() string {
 	return "/etc/data-backup/config.toml"
 }
 
-func getRegistry() string {
-	if path := os.Getenv("REGISTRY"); path != "" {
-		fmt.Println("Using dev config")
-		return path
+func loadInit() (*Config, *map[string]Registry) {
+	var cfg Config
+	var regMap map[string]Registry
+
+	err := loadConfig(getConfig(), &cfg)
+	if err != nil {
+		log.Fatal(err)
 	}
-	return "/etc/data-backup/registry.json"
+	err = loadRegistry(cfg.RegistryPath, &regMap)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return &cfg, &regMap
+}
+
+func shouldBackup(f *DBFile, r *Registry) bool {
+	for _, backup := range r.Backups { //nil backups = fallthrough
+		if backup.Hash == f.Hash {
+			return false
+		}
+	}
+	return true
+}
+
+func backupDatabase() {
+	// get a string for today's date
+	now := time.Local
+	fmt.Println(now)
 }
 
 func main() {
-	sites := loadSites(getRegistry())
-	for k, v := range sites {
-		fmt.Printf("Key: %s, val: %d\n", k, v)
+	cfg, registryMap := loadInit()
+
+	for db, dbCfg := range cfg.Databases {
+		file, err := getFileInfo(dbCfg.Source)
+		if err != nil {
+			log.Fatalf("failed to get file info: %v", err)
+		}
+		registry, ok := (*registryMap)[db]
+		if ok { //registry exists
+			if shouldBackup(file, &registry) {
+				// trigger backup function
+				backupDatabase()
+			}
+		}
 	}
 }
