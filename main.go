@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -48,8 +49,13 @@ func saveRegistry(r map[string]Registry, regPath string) error {
 
 func loadRegistry(path string, r *map[string]Registry) error {
 	jsonData, err := os.ReadFile(path)
-	if err != nil {
+	if os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("failed to read registry: %w", err)
+	}
+	if len(jsonData) == 0 {
+		return nil
 	}
 	err = json.Unmarshal(jsonData, r)
 	if err != nil {
@@ -120,26 +126,40 @@ func shouldBackup(f *DBFile, r *Registry) bool {
 	return true
 }
 
-func backupDatabase() {
-	// get a string for today's date
-	now := time.Local
-	fmt.Println(now)
+func fmtFilename(t time.Time, dbName string) string {
+	timeStr := fmt.Sprintf("%d-%.2d-%.2d", t.Year(), int(t.Month()), t.Day())
+	return fmt.Sprintf("%s-%s.db", timeStr, dbName)
 }
+
+func backupDatabase(dbName string, cfg *DBCfg, reg *Registry) error {
+	t := time.Now()
+	reg.LastBackup = t.Unix()
+	filePath := fmt.Sprintf("%s/%s", cfg.Stage, fmtFilename(t, dbName))
+
+	subcommand := fmt.Sprintf(".backup '%s'", filePath)
+	cmd := exec.Command("sqlite3", cfg.Source, subcommand)
+	out, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(string(out))
+	return nil
+}
+
+func computeBackupSize(reg *Registry) {}
 
 func main() {
 	cfg, registryMap := loadInit()
 
-	for db, dbCfg := range cfg.Databases {
+	for dbName, dbCfg := range cfg.Databases {
 		file, err := getFileInfo(dbCfg.Source)
 		if err != nil {
 			log.Fatalf("failed to get file info: %v", err)
 		}
-		registry, ok := (*registryMap)[db]
-		if ok { //registry exists
-			if shouldBackup(file, &registry) {
-				// trigger backup function
-				backupDatabase()
-			}
+		registry, ok := (*registryMap)[dbName]
+		if !ok || shouldBackup(file, &registry) {
+			backupDatabase(dbName, &dbCfg, &registry)
 		}
 	}
 }
