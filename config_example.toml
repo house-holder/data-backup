@@ -1,0 +1,14 @@
+debug_mode = false
+
+remote_path = "path/to/remote/drive/"
+registry_path = "/var/lib/data-backup/registry.json"
+report_freq_days = 7
+warn_no_backup_days = 14
+
+[databases.name_of_some_database]
+source = "path/to/your/name_of_some_database.db"
+stage = "/var/lib/data-backup/name_of_some_database/"
+
+[databases.name_of_another_database]
+source = "path/to/your/name_of_another_database.db"
+stage = "/var/lib/data-backup/name_of_another_database/"
