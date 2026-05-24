@@ -14,7 +14,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const maxDBEntries = 10
+const maxDBEntries = 15
 
 type BackupEntry struct {
 	SizeBytes  int    `json:"size_bytes"`
@@ -63,7 +63,7 @@ func (r *Registry) createBackup(name string, db *DB, remote string) error {
 		return nil
 	}
 
-	filename := datestampFilename(tm, name)
+	filename := stampFilename(tm, name)
 
 	entry.Epoch = tm.Unix()
 	entry.LocalPath = fmt.Sprintf("%s%s", db.Stage, filename)
@@ -75,7 +75,7 @@ func (r *Registry) createBackup(name string, db *DB, remote string) error {
 	subCmdLocal := fmt.Sprintf(".backup '%s'", entry.LocalPath)
 	cmdLocal := exec.Command("sqlite3", db.Source, subCmdLocal)
 	out, err := cmdLocal.Output()
-	if out != nil {
+	if len(out) > 0 {
 		fmt.Println(string(out))
 	}
 	if err != nil {
@@ -84,12 +84,13 @@ func (r *Registry) createBackup(name string, db *DB, remote string) error {
 
 	cmdRemote := exec.Command("rclone", "copy", entry.LocalPath, remote)
 	out, err = cmdRemote.Output()
-	if out != nil {
+	if len(out) > 0 {
 		fmt.Println(string(out))
 	}
 	if err != nil {
 		return err
 	}
+
 	r.update()
 	return nil
 }
@@ -101,8 +102,8 @@ func (r *Registry) deleteBackup(filename string, remote string) error {
 	}
 	cmd := exec.Command("rclone", "deletefile", remote)
 	out, err := cmd.Output()
-	if out != nil {
-		fmt.Println(string(out))
+	if len(out) > 0 {
+		fmt.Printf("        out: %s\n", string(out))
 	}
 	if err != nil {
 		return err
@@ -179,12 +180,12 @@ func getFileInfo(path string) (*BackupEntry, error) {
 	e.Hash = getSHA256(bytes)
 	e.SizeBytes = len(bytes)
 
+	fmt.Printf("    [getFileInfo] %s\n", path)
 	return &e, nil
 }
 
 func getConfig() string {
 	if path := os.Getenv("CFG_PATH"); path != "" {
-		fmt.Println("Using dev config")
 		return path
 	}
 	return "/etc/data-backup/config.toml"
@@ -207,18 +208,23 @@ func loadInit() (*DatabaseConfig, *map[string]*Registry) {
 }
 
 func shouldBackup(e *BackupEntry, r *Registry) bool {
-	for _, backup := range r.Backups { //nil backups = fallthrough
+	for _, backup := range r.Backups {
 		if backup.Hash == e.Hash {
-			fmt.Println("found matching hash")
 			return false
 		}
 	}
 	return true
 }
 
-func datestampFilename(t time.Time, dbName string) string {
-	timeStr := fmt.Sprintf("%d-%.2d-%.2d", t.Year(), int(t.Month()), t.Day())
-	return fmt.Sprintf("%s-%s.db", timeStr, dbName)
+func stampFilename(t time.Time, dbName string) string {
+	return fmt.Sprintf(
+		"%d%.2d%.2d-%.2d%.2d-%s.db",
+		t.Year(),
+		int(t.Month()),
+		t.Day(),
+		t.Hour(),
+		t.Minute(),
+		dbName)
 }
 
 func main() {
