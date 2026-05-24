@@ -76,7 +76,30 @@ func (rpt *Reporter) validate(dbName string, reg *Registry, remote string) {
 	}
 }
 
-func (rpt *Reporter) broadcast(s *State) {
+func (rpt *Reporter) routineReport(s *State, cfg *DatabaseConfig) {
+	cmd := exec.Command("rclone", "size", cfg.RemotePath)
+	out, err := cmd.Output()
+	if err != nil {
+		log.Printf("routineReport: failed to get remote size: %v", err)
+	} else {
+		for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+			if strings.HasPrefix(line, "Total size:") {
+				size := strings.TrimPrefix(line, "Total size: ")
+				log.Printf("Total '%s' size: %s", cfg.RemotePath, size)
+			}
+		}
+	}
+
+	for dbName, reg := range s.Databases {
+		if reg.LastBackup == 0 {
+			log.Printf("Last '%s' backup: never", dbName)
+		} else {
+			log.Printf("Last '%s' backup: %s", dbName, relativeTime(reg.LastBackup))
+		}
+	}
+}
+
+func (rpt *Reporter) broadcast(s *State, cfg *DatabaseConfig, debug bool) {
 	tm := time.Now().Unix()
 	if len(rpt.warnings) > 0 {
 		for _, warning := range rpt.warnings {
@@ -84,10 +107,27 @@ func (rpt *Reporter) broadcast(s *State) {
 		}
 		rpt.warnings = []string{}
 	}
-	if (tm - rpt.lastReport) >= rpt.intervalSec {
+	if (tm-rpt.lastReport) >= rpt.intervalSec || debug {
 		rpt.lastReport = tm
 		s.LastReport = tm
-		// report routine items: rclone size gdrive:backups/ parsing? other?
+		rpt.routineReport(s, cfg)
+	}
+}
+
+func relativeTime(epoch int64) string {
+	t := time.Unix(epoch, 0).Local()
+	now := time.Now()
+
+	daysSince := int(now.Sub(t).Hours() / 24)
+	timeStr := t.Format("02 Jan 15:04 MST")
+
+	switch daysSince {
+	case 0:
+		return fmt.Sprintf("today (%s)", timeStr)
+	case 1:
+		return fmt.Sprintf("yesterday (%s)", timeStr)
+	default:
+		return fmt.Sprintf("%d days ago (%s)", daysSince, timeStr)
 	}
 }
 
@@ -127,6 +167,7 @@ func loadInit() (*DatabaseConfig, State) {
 
 func main() {
 	cfg, state := loadInit()
+	debug := cfg.Debug
 	reporter := Reporter{
 		lastReport:  state.LastReport,
 		intervalSec: cfg.ReportFreqDays * secsPerDay,
@@ -149,7 +190,7 @@ func main() {
 		reporter.validate(dbName, registry, remote)
 	}
 
-	reporter.broadcast(&state)
+	reporter.broadcast(&state, cfg, debug)
 
 	err := state.save(cfg.RegistryPath)
 	if err != nil {

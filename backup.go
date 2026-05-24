@@ -17,6 +17,7 @@ type DatabaseConfig struct {
 	RegistryPath     string        `toml:"registry_path"`
 	ReportFreqDays   int64         `toml:"report_freq_days"`
 	WarnNoBackupDays int64         `toml:"warn_no_backup_days"`
+	Debug            bool          `toml:"debug_mode"`
 	Databases        map[string]DB `toml:"databases"`
 }
 
