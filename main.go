@@ -30,6 +30,11 @@ type Registry struct {
 	Backups    map[string]BackupEntry `json:"backups"`
 }
 
+type State struct {
+	LastReport int64                `json:"last_report"`
+	Databases  map[string]*Registry `json:"databases"`
+}
+
 func (r *Registry) update() {
 	if len(r.Backups) > maxDBEntries {
 		filename := ""
@@ -123,8 +128,8 @@ type DatabaseConfig struct {
 	Databases    map[string]DB `toml:"databases"`
 }
 
-func saveState(r map[string]*Registry, regPath string) error {
-	data, err := json.MarshalIndent(r, "", "  ")
+func saveState(state *State, regPath string) error {
+	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal registry: %w", err)
 	}
@@ -135,7 +140,7 @@ func saveState(r map[string]*Registry, regPath string) error {
 	return nil
 }
 
-func loadState(path string, r *map[string]*Registry) error {
+func loadState(path string, state *State) error {
 	jsonData, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil
@@ -145,7 +150,7 @@ func loadState(path string, r *map[string]*Registry) error {
 	if len(jsonData) == 0 {
 		return nil
 	}
-	err = json.Unmarshal(jsonData, r)
+	err = json.Unmarshal(jsonData, state)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal registry: %w", err)
 	}
@@ -191,20 +196,21 @@ func getConfig() string {
 	return "/etc/data-backup/config.toml"
 }
 
-func loadInit() (*DatabaseConfig, *map[string]*Registry) {
+func loadInit() (*DatabaseConfig, State) {
 	var dbCfg DatabaseConfig
-	regMap := map[string]*Registry{}
+	var state State
+	state.Databases = map[string]*Registry{}
 
 	err := loadConfig(getConfig(), &dbCfg)
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = loadState(dbCfg.RegistryPath, &regMap)
+	err = loadState(dbCfg.RegistryPath, &state)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	return &dbCfg, &regMap
+	return &dbCfg, state
 }
 
 func shouldBackup(e *BackupEntry, r *Registry) bool {
@@ -228,22 +234,21 @@ func stampFilename(t time.Time, dbName string) string {
 }
 
 func main() {
-	cfg, registryMap := loadInit()
+	cfg, state := loadInit()
 
 	for dbName, db := range cfg.Databases {
 		remote := cfg.RemotePath + dbName
 
-		registry, ok := (*registryMap)[dbName]
+		registry, ok := state.Databases[dbName]
 		if !ok {
 			newRegistry := Registry{Backups: map[string]BackupEntry{}}
-			(*registryMap)[dbName] = &newRegistry
+			state.Databases[dbName] = &newRegistry
 			registry = &newRegistry
 		}
-
 		registry.createBackup(dbName, &db, remote)
 	}
 
-	err := saveState(*registryMap, cfg.RegistryPath)
+	err := saveState(&state, cfg.RegistryPath)
 	if err != nil {
 		log.Fatalf("problem saving application state: %v", err)
 	}
