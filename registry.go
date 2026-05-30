@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -88,6 +89,9 @@ func (r *Registry) createBackup(name string, db *DB, remote string) error {
 	r.LastBackup = tm.Unix()
 	r.Backups[filename] = *entry
 
+	if err := os.MkdirAll(db.Stage, 0755); err != nil {
+		return fmt.Errorf("failed to create stage dir: %w", err)
+	}
 	subCmdLocal := fmt.Sprintf(".backup '%s'", entry.LocalPath)
 	cmdLocal := exec.Command("sqlite3", db.Source, subCmdLocal)
 	out, err := cmdLocal.Output()
@@ -98,13 +102,15 @@ func (r *Registry) createBackup(name string, db *DB, remote string) error {
 		return err
 	}
 
+	var stderr bytes.Buffer
 	cmdRemote := exec.Command("rclone", "copy", entry.LocalPath, remote)
+	cmdRemote.Stderr = &stderr
 	out, err = cmdRemote.Output()
 	if len(out) > 0 {
 		fmt.Println(string(out))
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("rclone copy failed: %w\n%s", err, stderr.String())
 	}
 
 	r.update()
